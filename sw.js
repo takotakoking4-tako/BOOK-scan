@@ -1,2 +1,2 @@
-// v0.4: No offline cache. Avoid stale scripts during testing.
-self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.registration.unregister()));
+// v0.5: no offline cache; avoids stale JS on GitHub Pages.
+self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.registration.unregister()));

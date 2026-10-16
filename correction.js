@@ -79,5 +79,37 @@ window.ScanCorrection = (() => {
   for(let i=0;i<d.length;i+=4)for(let k=0;k<3;k++)d[i+k]=Math.max(0,Math.min(255,Math.round((d[i+k]-low)*gain+4)));
   c.putImageData(img,0,0);return canvas;
  }
- return {ready,detect,perspective,enhance};
+
+// Pure JavaScript perspective transform: works without OpenCV / external CDN.
+function solve8(A,b){
+ const n=8;A=A.map((r,i)=>[...r,b[i]]);
+ for(let i=0;i<n;i++){let pivot=i;for(let j=i+1;j<n;j++)if(Math.abs(A[j][i])>Math.abs(A[pivot][i]))pivot=j;
+ if(Math.abs(A[pivot][i])<1e-9)throw Error('四隅の位置が不正です');[A[i],A[pivot]]=[A[pivot],A[i]];
+ const v=A[i][i];for(let k=i;k<=n;k++)A[i][k]/=v;
+ for(let j=0;j<n;j++)if(j!==i){const q=A[j][i];for(let k=i;k<=n;k++)A[j][k]-=q*A[i][k];}}
+ return A.map(r=>r[n]);}
+function homography(dst,src){const A=[],b=[];for(let i=0;i<4;i++){
+ const {x,y}=dst[i],{x:u,y:v}=src[i];A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);
+ A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v);}
+ return solve8(A,b);}
+function warpJS(canvas,p){
+ const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+ let w=Math.round(Math.max(d(p[0],p[1]),d(p[3],p[2]))),h=Math.round(Math.max(d(p[0],p[3]),d(p[1],p[2])));
+ const scale=Math.min(1,1800/Math.max(w,h));w=Math.max(2,Math.round(w*scale));h=Math.max(2,Math.round(h*scale));
+ if(w<80||h<80)throw Error('四隅を広く指定してください');
+ const target=[{x:0,y:0},{x:w-1,y:0},{x:w-1,y:h-1},{x:0,y:h-1}];
+ const H=homography(target,p),sw=canvas.width,sh=canvas.height;
+ const sctx=canvas.getContext('2d',{willReadFrequently:true}),s=sctx.getImageData(0,0,sw,sh).data;
+ const out=document.createElement('canvas');out.width=w;out.height=h;const oc=out.getContext('2d');const im=oc.createImageData(w,h),data=im.data;
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+ const den=H[6]*x+H[7]*y+1,sx=(H[0]*x+H[1]*y+H[2])/den,sy=(H[3]*x+H[4]*y+H[5])/den;
+ const o=(y*w+x)*4;if(sx<0||sy<0||sx>=sw-1||sy>=sh-1){data[o]=data[o+1]=data[o+2]=255;data[o+3]=255;continue;}
+ const ix=Math.floor(sx),iy=Math.floor(sy),fx=sx-ix,fy=sy-iy,a=(iy*sw+ix)*4,b=a+4,c=a+sw*4,e=c+4;
+ for(let k=0;k<3;k++)data[o+k]=s[a+k]*(1-fx)*(1-fy)+s[b+k]*fx*(1-fy)+s[c+k]*(1-fx)*fy+s[e+k]*fx*fy;
+ data[o+3]=255;
+ }
+ oc.putImageData(im,0,0);return out;
+}
+
+ return {ready,detect,perspective,enhance,warpJS};
 })();

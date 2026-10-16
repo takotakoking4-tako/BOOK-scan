@@ -20,3 +20,16 @@ select,button{min-height:44px}
 .capture-side{height:54px;min-height:54px;padding:7px 5px;background:#1674e8;border-radius:13px;font-size:16px;white-space:nowrap;touch-action:manipulation}
 .capture-side:active:not(:disabled){transform:scale(.97)}
 @media(max-width:390px){.controls .row:first-child{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 90px}.capture-side{font-size:14px}}
+
+/* v0.5: iPhone-friendly four-corner editor */
+.edit-modal[hidden],#editPreviewWrap[hidden],#editBack[hidden],#editSave[hidden]{display:none!important}
+.edit-modal{position:fixed;inset:0;z-index:1000;background:rgba(7,15,30,.96);overflow:auto;padding:env(safe-area-inset-top) 12px env(safe-area-inset-bottom);color:white}
+.edit-panel{max-width:650px;margin:0 auto;padding:10px 0 24px}
+.edit-panel h2{font-size:19px;margin:8px 0}.edit-panel p{font-size:13px;line-height:1.5}
+.edit-stage{background:#10151e;display:flex;align-items:center;justify-content:center;min-height:260px;max-height:65vh;overflow:hidden;border-radius:12px}
+#editCanvas{display:block;max-width:100%;max-height:60vh;touch-action:none}
+.edit-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.edit-actions button{flex:1;min-width:100px;min-height:50px;font-size:14px;border-radius:10px}
+.edit-actions .primary{background:#1674e8;color:#fff}
+#editPreview{display:block;width:100%;max-height:45vh;object-fit:contain;background:#111}
+body.editing{overflow:hidden}

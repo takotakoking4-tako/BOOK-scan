@@ -24,35 +24,36 @@ function diff(a,b){if(!a||!b)return 999;let sum=0;for(let i=0;i<a.length;i++)sum
 function drawBox(b){overlay.width=video.videoWidth;overlay.height=video.videoHeight;ctx.clearRect(0,0,overlay.width,overlay.height);ctx.strokeStyle='#40e7a6';ctx.lineWidth=5;ctx.strokeRect(b.x/W*overlay.width,b.y/H*overlay.height,b.w/W*overlay.width,b.h/H*overlay.height);}
 async function tick(){if(!running)return;try{if(video.readyState>=2&&!busy){sc.drawImage(video,0,0,W,H);const data=sc.getImageData(0,0,W,H).data,b=bounds(data),sig=signature(data),change=diff(sig,previous);drawBox(b);if(change<4)stable++;else stable=0;if(change>12&&Date.now()-lastCapture>1200)armed=true;previous=sig;frames++;if($('auto').value==='on'&&armed&&stable>=7&&b.detected&&Date.now()-lastCapture>1800){armed=false;await capture(b);}}}catch(e){say('解析エラー: '+e.message);}if(running)setTimeout(tick,120);}
 function canvasBlob(c,type='image/jpeg',quality=.86){return new Promise((resolve,reject)=>c.toBlob(b=>b?resolve(b):reject(Error('画像変換失敗')),type,quality));}
+let editQueue=[],editSource=null,editPoints=[],editResult=null,editDragging=-1,editSaving=false;
+function defaultPoints(c){const padX=c.width*.07,padY=c.height*.07;return [{x:padX,y:padY},{x:c.width-padX,y:padY},{x:c.width-padX,y:c.height-padY},{x:padX,y:c.height-padY}];}
+function paintEditor(){const c=$('editCanvas'),ctx=c.getContext('2d');c.width=editSource.width;c.height=editSource.height;ctx.drawImage(editSource,0,0);ctx.beginPath();editPoints.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.fillStyle='rgba(0,180,255,.12)';ctx.fill();ctx.lineWidth=Math.max(3,c.width/180);ctx.strokeStyle='#00e6a8';ctx.stroke();editPoints.forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x,p.y,Math.max(13,c.width/65),0,Math.PI*2);ctx.fillStyle='#1689ff';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='white';ctx.stroke();ctx.fillStyle='white';ctx.font=`bold ${Math.max(16,c.width/40)}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(i+1),p.x,p.y);});}
+function editNext(){if(!editQueue.length){$('editModal').hidden=true;document.body.classList.remove('editing');busy=false;lastCapture=Date.now();stable=0;previous=null;armed=false;say(`保存済み: ${pages.length}ページ`);return;}
+ editSource=editQueue.shift();editResult=null;editPoints=defaultPoints(editSource);
+ try{if(ScanCorrection.ready()){const r=ScanCorrection.detect(editSource);if(r.points){editPoints=r.points;$('editMessage').textContent='四隅を自動検出しました。位置を確認・調整してください。';}else $('editMessage').textContent='自動検出できませんでした。青い丸をページの四隅へ移動してください。';}
+ else $('editMessage').textContent='自動検出エンジン未準備です。青い丸をページの四隅へ移動すると、台形補正できます。';}
+ catch(e){$('editMessage').textContent='青い丸をページの四隅へ移動してください。';}
+ $('editPreviewWrap').hidden=true;$('editBack').hidden=true;$('editSave').hidden=true;$('editApply').hidden=false;$('editReset').hidden=false;
+ $('editCanvas').hidden=false;paintEditor();}
+function pointerPos(e){const rect=$('editCanvas').getBoundingClientRect();return {x:(e.clientX-rect.left)*editSource.width/rect.width,y:(e.clientY-rect.top)*editSource.height/rect.height};}
+$('editCanvas').addEventListener('pointerdown',e=>{const p=pointerPos(e);let closest=Infinity;editPoints.forEach((v,i)=>{const d=Math.hypot(v.x-p.x,v.y-p.y);if(d<closest){closest=d;editDragging=i;}});$('editCanvas').setPointerCapture(e.pointerId);if(editDragging>=0){editPoints[editDragging]={x:Math.max(0,Math.min(editSource.width-1,p.x)),y:Math.max(0,Math.min(editSource.height-1,p.y))};paintEditor();}});
+$('editCanvas').addEventListener('pointermove',e=>{if(editDragging<0)return;const p=pointerPos(e);editPoints[editDragging]={x:Math.max(0,Math.min(editSource.width-1,p.x)),y:Math.max(0,Math.min(editSource.height-1,p.y))};paintEditor();});
+for(const ev of ['pointerup','pointercancel','lostpointercapture'])$('editCanvas').addEventListener(ev,()=>editDragging=-1);
+$('editReset').onclick=()=>{editPoints=defaultPoints(editSource);paintEditor();};
+$('editApply').onclick=()=>{try{editResult=ScanCorrection.warpJS(editSource,editPoints);if($('enhance').checked)ScanCorrection.enhance(editResult);$('editPreview').src=editResult.toDataURL('image/jpeg',.82);$('editPreviewWrap').hidden=false;$('editSave').hidden=false;$('editBack').hidden=false;$('editCanvas').hidden=true;$('editApply').hidden=true;$('editReset').hidden=true;say('台形補正完了：結果を確認して保存');}catch(e){alert('台形補正できません: '+e.message);}};
+$('editBack').onclick=()=>{$('editCanvas').hidden=false;$('editPreviewWrap').hidden=true;$('editSave').hidden=true;$('editBack').hidden=true;$('editApply').hidden=false;$('editReset').hidden=false;paintEditor();};
+$('editCancel').onclick=()=>{if(confirm('この撮影画像を破棄しますか？')){editQueue=[];editNext();}};
+$('editSave').onclick=async()=>{if(editSaving||!editResult)return;editSaving=true;try{await save(await canvasBlob(editResult));editNext();}catch(e){alert('保存失敗: '+e.message);}finally{editSaving=false;}};
 async function capture(b=null){
  if(busy||!stream)return;busy=true;
- try{
-  const vw=video.videoWidth,vh=video.videoHeight;if(!vw||!vh)throw Error('映像を取得できません');
-  const source=document.createElement('canvas');source.width=vw;source.height=vh;source.getContext('2d').drawImage(video,0,0,vw,vh);
-  // Geometry detection must run on the full frame, before any approximate crop.
-  const split=$('mode').value==='spread';let messages=[];
-  for(let i=0;i<(split?2:1);i++){
-   let c=document.createElement('canvas');c.width=split?Math.floor(vw/2):vw;c.height=vh;
-   c.getContext('2d').drawImage(source,split?i*vw/2:0,0,split?vw/2:vw,vh,0,0,c.width,c.height);
-   if($('perspective').checked){
-    const r=window.ScanCorrection?.perspective(c);
-    if(!r)throw Error('correction.jsが未読込です。再読み込みしてください');
-    if(r.corrected)c=r.canvas;
-    messages.push(r.reason||'台形補正なし');
-   }else if(b&&$('crop').checked&&b.detected&&!split){
-    const x=Math.max(0,Math.floor(b.x/W*vw)),y=Math.max(0,Math.floor(b.y/H*vh));
-    const w=Math.min(vw-x,Math.floor(b.w/W*vw)),h=Math.min(vh-y,Math.floor(b.h/H*vh));
-    const cropped=document.createElement('canvas');cropped.width=w;cropped.height=h;
-    cropped.getContext('2d').drawImage(c,x,y,w,h,0,0,w,h);c=cropped;
-   }
-   if($('enhance').checked){if(!window.ScanCorrection)throw Error('補正プログラム未読込');c=ScanCorrection.enhance(c);}
-   await save(await canvasBlob(c));
-  }
-  lastCapture=Date.now();stable=0;previous=null;armed=false;
-  say(`保存済み: ${pages.length}ページ`+(messages.length?' / '+messages.join('・'):''));
- }catch(e){say('撮影失敗: '+e.message);}finally{busy=false;}
+ try{const vw=video.videoWidth,vh=video.videoHeight;if(!vw||!vh)throw Error('映像を取得できません');
+ const source=document.createElement('canvas');source.width=vw;source.height=vh;source.getContext('2d').drawImage(video,0,0,vw,vh);
+ editQueue=[];const split=$('mode').value==='spread';for(let i=0;i<(split?2:1);i++){
+ const c=document.createElement('canvas');c.width=split?Math.floor(vw/2):vw;c.height=vh;c.getContext('2d').drawImage(source,split?i*vw/2:0,0,split?vw/2:vw,vh,0,0,c.width,c.height);editQueue.push(c);}
+ $('editModal').hidden=false;document.body.classList.add('editing');editNext();
+ }catch(e){busy=false;say('撮影失敗: '+e.message);}
 }
-async function start(){if(running)return;try{if(!navigator.mediaDevices?.getUserMedia)throw Error('HTTPSのSafariで開いてください');stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});video.srcObject=stream;await video.play();$('placeholder').hidden=true;running=true;armed=true;stable=0;previous=null;$('start').disabled=true;$('capture').disabled=$('stop').disabled=false;say(window.ScanCorrection?.ready()?'撮影待機中（補正準備完了）':'撮影待機中（OpenCV読込中：台形補正はまだ利用不可）');tick();}catch(e){say('カメラ起動失敗: '+e.message);}}
+
+async function start(){if(running)return;try{if(!navigator.mediaDevices?.getUserMedia)throw Error('HTTPSのSafariで開いてください');stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});video.srcObject=stream;await video.play();$('placeholder').hidden=true;running=true;armed=true;stable=0;previous=null;$('start').disabled=true;$('capture').disabled=$('stop').disabled=false;say(window.ScanCorrection?.ready()?'撮影待機中（自動検出利用可）':'撮影待機中（手動四隅補正は利用可）');tick();}catch(e){say('カメラ起動失敗: '+e.message);}}
 function stop(){running=false;stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;ctx.clearRect(0,0,overlay.width,overlay.height);$('placeholder').hidden=false;$('start').disabled=false;$('capture').disabled=$('stop').disabled=true;say('停止中');}
 async function exportPDF(){if(!pages.length)return;const jsPDF=window.jspdf?.jsPDF;if(!jsPDF){alert('PDFライブラリを読み込めません。ネット接続を確認してください。');return;}const btn=$('export');btn.disabled=true;say('PDF作成中');try{let pdf=null;for(let i=0;i<pages.length;i++){const url=URL.createObjectURL(pages[i].blob),img=new Image();try{img.src=url;await img.decode();const mm=25.4/150,w=img.naturalWidth*mm,h=img.naturalHeight*mm;if(!pdf)pdf=new jsPDF({orientation:w>h?'landscape':'portrait',unit:'mm',format:[w,h],compress:true});else pdf.addPage([w,h],w>h?'landscape':'portrait');pdf.addImage(img,'JPEG',0,0,w,h,undefined,'FAST');}finally{URL.revokeObjectURL(url);}say(`PDF作成中 ${i+1}/${pages.length}`);await sleep(0);}const name=`BookScan_${new Date().toISOString().slice(0,10)}.pdf`;const blob=pdf.output('blob');const file=new File([blob],name,{type:'application/pdf'});if(navigator.canShare?.({files:[file]})){try{await navigator.share({files:[file],title:name});}catch(e){if(e.name!=='AbortError')throw e;}}else{const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}say('PDF作成完了');}catch(e){say('PDF作成失敗: '+e.message);alert('PDF作成に失敗しました。ページ数を減らして再試行してください。');}finally{btn.disabled=false;}}
 $('auto').onchange=updateCaptureMode;updateCaptureMode();$('start').onclick=start;$('stop').onclick=stop;$('capture').onclick=()=>{armed=false;capture();};$('undo').onclick=()=>remove(pages.length-1);$('clear').onclick=async()=>{if(!confirm('全ページを削除しますか？'))return;await transaction('readwrite',s=>s.clear());pages=[];render();};$('export').onclick=exportPDF;window.addEventListener('pagehide',stop);(async()=>{try{db=await dbOpen();await load();say('準備完了');}catch(e){say('保存領域を利用できません: '+e.message);}})();if('serviceWorker'in navigator){navigator.serviceWorker.getRegistrations().then(rs=>Promise.all(rs.map(r=>r.unregister()))).catch(()=>{});}
