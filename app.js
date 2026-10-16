@@ -5,7 +5,7 @@ let stream=null,running=false,busy=false,frames=0,previous=null,stable=0,armed=t
 const W=320,H=240;const sample=document.createElement('canvas');sample.width=W;sample.height=H;const sc=sample.getContext('2d',{willReadFrequently:true});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function say(s){$('status').textContent=s;}
-function updateCaptureMode(){const isAuto=$('auto').value==='on';$('cameraMode').textContent=isAuto?'● 自動撮影モード':'● 手動撮影モード';$('captureLabel').textContent=isAuto?'静止すると自動撮影／タップでも撮影':'中央の丸いボタンをタップして撮影';stable=0;previous=null;armed=true;}
+function updateCaptureMode(){const isAuto=$('auto').value==='on';stable=0;previous=null;armed=true;}
 
 function dbOpen(){return new Promise((resolve,reject)=>{const r=indexedDB.open('bookscan-v1',1);r.onupgradeneeded=()=>r.result.createObjectStore('pages',{keyPath:'id',autoIncrement:true});r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 function transaction(mode,fn){return new Promise((resolve,reject)=>{const tx=db.transaction('pages',mode),store=tx.objectStore('pages');let req=fn(store);tx.oncomplete=()=>resolve(req?.result);tx.onerror=()=>reject(tx.error);});}
@@ -36,7 +36,7 @@ async function capture(b=null){
    c.getContext('2d').drawImage(source,split?i*vw/2:0,0,split?vw/2:vw,vh,0,0,c.width,c.height);
    if($('perspective').checked){
     const r=window.ScanCorrection?.perspective(c);
-    if(!r)throw Error('correction.jsを読み込めません。GitHubのファイルとキャッシュを確認してください');
+    if(!r)throw Error('correction.jsが未読込です。再読み込みしてください');
     if(r.corrected)c=r.canvas;
     messages.push(r.reason||'台形補正なし');
    }else if(b&&$('crop').checked&&b.detected&&!split){
@@ -45,14 +45,14 @@ async function capture(b=null){
     const cropped=document.createElement('canvas');cropped.width=w;cropped.height=h;
     cropped.getContext('2d').drawImage(c,x,y,w,h,0,0,w,h);c=cropped;
    }
-   if($('enhance').checked)c=ScanCorrection.enhance(c);
+   if($('enhance').checked){if(!window.ScanCorrection)throw Error('補正プログラム未読込');c=ScanCorrection.enhance(c);}
    await save(await canvasBlob(c));
   }
   lastCapture=Date.now();stable=0;previous=null;armed=false;
   say(`保存済み: ${pages.length}ページ`+(messages.length?' / '+messages.join('・'):''));
  }catch(e){say('撮影失敗: '+e.message);}finally{busy=false;}
 }
-async function start(){if(running)return;try{if(!navigator.mediaDevices?.getUserMedia)throw Error('HTTPSのSafariで開いてください');stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});video.srcObject=stream;await video.play();$('placeholder').hidden=true;running=true;armed=true;stable=0;previous=null;$('start').disabled=true;$('capture').disabled=$('stop').disabled=false;say('撮影待機中');tick();}catch(e){say('カメラ起動失敗: '+e.message);}}
+async function start(){if(running)return;try{if(!navigator.mediaDevices?.getUserMedia)throw Error('HTTPSのSafariで開いてください');stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});video.srcObject=stream;await video.play();$('placeholder').hidden=true;running=true;armed=true;stable=0;previous=null;$('start').disabled=true;$('capture').disabled=$('stop').disabled=false;say(window.ScanCorrection?.ready()?'撮影待機中（補正準備完了）':'撮影待機中（OpenCV読込中：台形補正はまだ利用不可）');tick();}catch(e){say('カメラ起動失敗: '+e.message);}}
 function stop(){running=false;stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;ctx.clearRect(0,0,overlay.width,overlay.height);$('placeholder').hidden=false;$('start').disabled=false;$('capture').disabled=$('stop').disabled=true;say('停止中');}
 async function exportPDF(){if(!pages.length)return;const jsPDF=window.jspdf?.jsPDF;if(!jsPDF){alert('PDFライブラリを読み込めません。ネット接続を確認してください。');return;}const btn=$('export');btn.disabled=true;say('PDF作成中');try{let pdf=null;for(let i=0;i<pages.length;i++){const url=URL.createObjectURL(pages[i].blob),img=new Image();try{img.src=url;await img.decode();const mm=25.4/150,w=img.naturalWidth*mm,h=img.naturalHeight*mm;if(!pdf)pdf=new jsPDF({orientation:w>h?'landscape':'portrait',unit:'mm',format:[w,h],compress:true});else pdf.addPage([w,h],w>h?'landscape':'portrait');pdf.addImage(img,'JPEG',0,0,w,h,undefined,'FAST');}finally{URL.revokeObjectURL(url);}say(`PDF作成中 ${i+1}/${pages.length}`);await sleep(0);}const name=`BookScan_${new Date().toISOString().slice(0,10)}.pdf`;const blob=pdf.output('blob');const file=new File([blob],name,{type:'application/pdf'});if(navigator.canShare?.({files:[file]})){try{await navigator.share({files:[file],title:name});}catch(e){if(e.name!=='AbortError')throw e;}}else{const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}say('PDF作成完了');}catch(e){say('PDF作成失敗: '+e.message);alert('PDF作成に失敗しました。ページ数を減らして再試行してください。');}finally{btn.disabled=false;}}
-$('auto').onchange=updateCaptureMode;updateCaptureMode();$('start').onclick=start;$('stop').onclick=stop;$('capture').onclick=()=>{armed=false;capture();};$('undo').onclick=()=>remove(pages.length-1);$('clear').onclick=async()=>{if(!confirm('全ページを削除しますか？'))return;await transaction('readwrite',s=>s.clear());pages=[];render();};$('export').onclick=exportPDF;window.addEventListener('pagehide',stop);(async()=>{try{db=await dbOpen();await load();say('準備完了');}catch(e){say('保存領域を利用できません: '+e.message);}})();if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+$('auto').onchange=updateCaptureMode;updateCaptureMode();$('start').onclick=start;$('stop').onclick=stop;$('capture').onclick=()=>{armed=false;capture();};$('undo').onclick=()=>remove(pages.length-1);$('clear').onclick=async()=>{if(!confirm('全ページを削除しますか？'))return;await transaction('readwrite',s=>s.clear());pages=[];render();};$('export').onclick=exportPDF;window.addEventListener('pagehide',stop);(async()=>{try{db=await dbOpen();await load();say('準備完了');}catch(e){say('保存領域を利用できません: '+e.message);}})();if('serviceWorker'in navigator){navigator.serviceWorker.getRegistrations().then(rs=>Promise.all(rs.map(r=>r.unregister()))).catch(()=>{});}

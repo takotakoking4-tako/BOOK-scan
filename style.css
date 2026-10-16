@@ -13,3 +13,10 @@
 body{padding-bottom:env(safe-area-inset-bottom,0px)}
 select,button{min-height:44px}
 @media(max-width:480px){.viewer{aspect-ratio:3/4}.camera-bar{padding-bottom:10px}.shutter{width:82px;height:82px}.shutter-inner{width:59px;height:59px}}
+
+/* v0.4: capture button is OUTSIDE the camera preview */
+.controls .row:first-child{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 108px;align-items:end;gap:8px}
+.controls .row:first-child label{min-width:0}.controls .row:first-child select{width:100%;font-size:13px;padding:8px 4px}
+.capture-side{height:54px;min-height:54px;padding:7px 5px;background:#1674e8;border-radius:13px;font-size:16px;white-space:nowrap;touch-action:manipulation}
+.capture-side:active:not(:disabled){transform:scale(.97)}
+@media(max-width:390px){.controls .row:first-child{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 90px}.capture-side{font-size:14px}}

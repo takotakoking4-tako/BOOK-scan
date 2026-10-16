@@ -11,34 +11,47 @@ window.ScanCorrection = (() => {
   return [tl,tr,br,bl];
  }
  function detect(canvas){
-  if(!ready())return {points:null,reason:'OpenCV読み込み待ち'};
-  let src,gray,blur,edges,contours,hierarchy,kernel;
+  if(!ready())return {points:null,reason:'OpenCV未準備：通信状態を確認して再読み込み'};
+  let src,small,gray,blur,edges,contours,hierarchy,kernel;
   try{
-   src=cv.imread(canvas);gray=new cv.Mat();blur=new cv.Mat();edges=new cv.Mat();contours=new cv.MatVector();hierarchy=new cv.Mat();
-   cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);cv.GaussianBlur(gray,blur,new cv.Size(5,5),0);
-   cv.Canny(blur,edges,35,110);
-   kernel=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(5,5));cv.morphologyEx(edges,edges,cv.MORPH_CLOSE,kernel);
-   cv.findContours(edges,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
-   const areaTotal=canvas.width*canvas.height;let best=null,bestScore=0;
-   for(let i=0;i<contours.size();i++){
-    const contour=contours.get(i);let approx;
-    try{
-     const perimeter=cv.arcLength(contour,true);if(perimeter<200)continue;
-     approx=new cv.Mat();cv.approxPolyDP(contour,approx,0.025*perimeter,true);
-     const area=Math.abs(cv.contourArea(approx));
-     if(approx.rows!==4||!cv.isContourConvex(approx)||area<areaTotal*.12||area>areaTotal*.985)continue;
-     const d=approx.data32S,p=[];for(let j=0;j<4;j++)p.push({x:d[j*2],y:d[j*2+1]});
-     const ordered=corners(p);if(!ordered)continue;
-     const w=Math.max(dist(ordered[0],ordered[1]),dist(ordered[3],ordered[2]));
-     const h=Math.max(dist(ordered[0],ordered[3]),dist(ordered[1],ordered[2]));
-     if(Math.min(w,h)<90||Math.min(w,h)/Math.max(w,h)<.28)continue;
-     const score=area/areaTotal;
-     if(score>bestScore){best=ordered;bestScore=score;}
-    }finally{approx?.delete();contour.delete();}
+   src=cv.imread(canvas);
+   // Detect on a downscaled image: faster and more stable on iPhone.
+   const scale=Math.min(1,900/Math.max(src.cols,src.rows));
+   small=new cv.Mat();cv.resize(src,small,new cv.Size(Math.max(1,Math.round(src.cols*scale)),Math.max(1,Math.round(src.rows*scale))),0,0,cv.INTER_AREA);
+   gray=new cv.Mat();blur=new cv.Mat();edges=new cv.Mat();
+   cv.cvtColor(small,gray,cv.COLOR_RGBA2GRAY);cv.GaussianBlur(gray,blur,new cv.Size(5,5),0);
+   const areaTotal=small.cols*small.rows;let best=null,bestScore=-Infinity;
+   // Multiple Canny thresholds help with low-contrast paper edges.
+   for(const [lo,hi] of [[20,65],[45,125],[75,190]]){
+    cv.Canny(blur,edges,lo,hi);
+    kernel=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(5,5));
+    cv.morphologyEx(edges,edges,cv.MORPH_CLOSE,kernel);kernel.delete();kernel=null;
+    contours=new cv.MatVector();hierarchy=new cv.Mat();
+    cv.findContours(edges,contours,hierarchy,cv.RETR_LIST,cv.CHAIN_APPROX_SIMPLE);
+    for(let i=0;i<contours.size();i++){
+     const contour=contours.get(i);let approx;
+     try{
+      const perimeter=cv.arcLength(contour,true);if(perimeter<100)continue;
+      for(const epsilon of [.018,.03,.045,.065]){
+       approx?.delete();approx=new cv.Mat();cv.approxPolyDP(contour,approx,epsilon*perimeter,true);
+       if(approx.rows!==4||!cv.isContourConvex(approx))continue;
+       const area=Math.abs(cv.contourArea(approx));if(area<areaTotal*.08||area>areaTotal*.97)continue;
+       const d=approx.data32S,p=[];for(let j=0;j<4;j++)p.push({x:d[j*2],y:d[j*2+1]});
+       const ordered=corners(p);if(!ordered)continue;
+       const w=Math.max(dist(ordered[0],ordered[1]),dist(ordered[3],ordered[2]));
+       const h=Math.max(dist(ordered[0],ordered[3]),dist(ordered[1],ordered[2]));
+       if(Math.min(w,h)<60||Math.min(w,h)/Math.max(w,h)<.23)continue;
+       const margin=Math.min(...ordered.map(q=>Math.min(q.x,q.y,small.cols-q.x,small.rows-q.y)));
+       const score=area/areaTotal-(margin<3?.08:0);
+       if(score>bestScore){best=ordered.map(q=>({x:q.x/scale,y:q.y/scale}));bestScore=score;}
+      }
+     }finally{approx?.delete();contour.delete();}
+    }
+    contours.delete();contours=null;hierarchy.delete();hierarchy=null;
    }
-   return {points:best,reason:best?'':'ページの四隅を検出できませんでした'};
+   return {points:best,reason:best?'':'四隅を検出できません。紙全体を映し、背景を暗くしてください'};
   }catch(e){console.warn('detect',e);return {points:null,reason:'輪郭検出エラー: '+e.message};}
-  finally{src?.delete();gray?.delete();blur?.delete();edges?.delete();contours?.delete();hierarchy?.delete();kernel?.delete();}
+  finally{src?.delete();small?.delete();gray?.delete();blur?.delete();edges?.delete();contours?.delete();hierarchy?.delete();kernel?.delete();}
  }
  function perspective(canvas){
   const result=detect(canvas);if(!result.points)return {canvas,corrected:false,reason:result.reason};
