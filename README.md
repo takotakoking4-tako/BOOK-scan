@@ -1,4 +1,7 @@
-BookScan v0.5
-撮影後に四隅を確認し、指で移動して台形補正します。OpenCVが読み込めない場合も、JavaScriptだけで補正できます。自動四隅検出はOpenCV読込時のみ有効です。
-既存GitHubリポジトリのindex.html, style.css, app.js, correction.js, sw.jsを更新してください。
-見開きは左右を順番に補正します。撮影後は補正結果を確認して保存します。
+BookScan Ver.0.6 - iPhone camera restart fix
+
+撮影後の四隅補正画面を開く前にカメラのMediaStreamを解放し、補正画面を閉じた際に新しいMediaStreamを取得して再開します。自動撮影は再開直後の重複撮影を防ぐため、次のページ変化を待ちます。
+
+GitHub Pagesのリポジトリ直下へ index.html, app.js, sw.js を上書きしてください。既存の style.css, correction.js などは維持します。
+
+注意：iPhone Safari実機未検証です。カメラ権限を再確認する場合があります。

@@ -2,6 +2,7 @@
 const $=id=>document.getElementById(id);
 const video=$('camera'),overlay=$('overlay'),ctx=overlay.getContext('2d');
 let stream=null,running=false,busy=false,frames=0,previous=null,stable=0,armed=true,lastCapture=0,db=null,pages=[];
+let cameraEpoch=0,resumeAfterEdit=false,starting=false;
 const W=320,H=240;const sample=document.createElement('canvas');sample.width=W;sample.height=H;const sc=sample.getContext('2d',{willReadFrequently:true});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function say(s){$('status').textContent=s;}
@@ -22,12 +23,14 @@ function bounds(data){ // Find a high-contrast content region; falls back to the
 function signature(data){const sig=[];for(let y=10;y<H;y+=15)for(let x=10;x<W;x+=15){const k=(y*W+x)*4;sig.push((data[k]+data[k+1]+data[k+2])/3);}return sig;}
 function diff(a,b){if(!a||!b)return 999;let sum=0;for(let i=0;i<a.length;i++)sum+=Math.abs(a[i]-b[i]);return sum/a.length;}
 function drawBox(b){overlay.width=video.videoWidth;overlay.height=video.videoHeight;ctx.clearRect(0,0,overlay.width,overlay.height);ctx.strokeStyle='#40e7a6';ctx.lineWidth=5;ctx.strokeRect(b.x/W*overlay.width,b.y/H*overlay.height,b.w/W*overlay.width,b.h/H*overlay.height);}
-async function tick(){if(!running)return;try{if(video.readyState>=2&&!busy){sc.drawImage(video,0,0,W,H);const data=sc.getImageData(0,0,W,H).data,b=bounds(data),sig=signature(data),change=diff(sig,previous);drawBox(b);if(change<4)stable++;else stable=0;if(change>12&&Date.now()-lastCapture>1200)armed=true;previous=sig;frames++;if($('auto').value==='on'&&armed&&stable>=7&&b.detected&&Date.now()-lastCapture>1800){armed=false;await capture(b);}}}catch(e){say('解析エラー: '+e.message);}if(running)setTimeout(tick,120);}
+async function tick(epoch){if(!running||epoch!==cameraEpoch)return;try{if(video.readyState>=2&&!busy){sc.drawImage(video,0,0,W,H);const data=sc.getImageData(0,0,W,H).data,b=bounds(data),sig=signature(data),change=diff(sig,previous);drawBox(b);if(change<4)stable++;else stable=0;if(change>12&&Date.now()-lastCapture>1200)armed=true;previous=sig;frames++;if($('auto').value==='on'&&armed&&stable>=7&&b.detected&&Date.now()-lastCapture>1800){armed=false;await capture(b);}}}catch(e){say('解析エラー: '+e.message);}if(running&&epoch===cameraEpoch)setTimeout(()=>tick(epoch),120);}
 function canvasBlob(c,type='image/jpeg',quality=.86){return new Promise((resolve,reject)=>c.toBlob(b=>b?resolve(b):reject(Error('画像変換失敗')),type,quality));}
 let editQueue=[],editSource=null,editPoints=[],editResult=null,editDragging=-1,editSaving=false;
 function defaultPoints(c){const padX=c.width*.07,padY=c.height*.07;return [{x:padX,y:padY},{x:c.width-padX,y:padY},{x:c.width-padX,y:c.height-padY},{x:padX,y:c.height-padY}];}
 function paintEditor(){const c=$('editCanvas'),ctx=c.getContext('2d');c.width=editSource.width;c.height=editSource.height;ctx.drawImage(editSource,0,0);ctx.beginPath();editPoints.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.fillStyle='rgba(0,180,255,.12)';ctx.fill();ctx.lineWidth=Math.max(3,c.width/180);ctx.strokeStyle='#00e6a8';ctx.stroke();editPoints.forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x,p.y,Math.max(13,c.width/65),0,Math.PI*2);ctx.fillStyle='#1689ff';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='white';ctx.stroke();ctx.fillStyle='white';ctx.font=`bold ${Math.max(16,c.width/40)}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(String(i+1),p.x,p.y);});}
-function editNext(){if(!editQueue.length){$('editModal').hidden=true;document.body.classList.remove('editing');busy=false;lastCapture=Date.now();stable=0;previous=null;armed=false;say(`保存済み: ${pages.length}ページ`);return;}
+function editNext(){if(!editQueue.length){$('editModal').hidden=true;document.body.classList.remove('editing');busy=false;lastCapture=Date.now();stable=0;previous=null;armed=false;
+ const shouldResume=resumeAfterEdit;resumeAfterEdit=false;
+ if(shouldResume){say('カメラを再開しています…');start(true);}else say(`保存済み: ${pages.length}ページ`);return;}
  editSource=editQueue.shift();editResult=null;editPoints=defaultPoints(editSource);
  try{if(ScanCorrection.ready()){const r=ScanCorrection.detect(editSource);if(r.points){editPoints=r.points;$('editMessage').textContent='四隅を自動検出しました。位置を確認・調整してください。';}else $('editMessage').textContent='自動検出できませんでした。青い丸をページの四隅へ移動してください。';}
  else $('editMessage').textContent='自動検出エンジン未準備です。青い丸をページの四隅へ移動すると、台形補正できます。';}
@@ -49,11 +52,45 @@ async function capture(b=null){
  const source=document.createElement('canvas');source.width=vw;source.height=vh;source.getContext('2d').drawImage(video,0,0,vw,vh);
  editQueue=[];const split=$('mode').value==='spread';for(let i=0;i<(split?2:1);i++){
  const c=document.createElement('canvas');c.width=split?Math.floor(vw/2):vw;c.height=vh;c.getContext('2d').drawImage(source,split?i*vw/2:0,0,split?vw/2:vw,vh,0,0,c.width,c.height);editQueue.push(c);}
+ resumeAfterEdit=running;pauseCameraForEditor();
  $('editModal').hidden=false;document.body.classList.add('editing');editNext();
  }catch(e){busy=false;say('撮影失敗: '+e.message);}
 }
 
-async function start(){if(running)return;try{if(!navigator.mediaDevices?.getUserMedia)throw Error('HTTPSのSafariで開いてください');stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});video.srcObject=stream;await video.play();$('placeholder').hidden=true;running=true;armed=true;stable=0;previous=null;$('start').disabled=true;$('capture').disabled=$('stop').disabled=false;say(window.ScanCorrection?.ready()?'撮影待機中（自動検出利用可）':'撮影待機中（手動四隅補正は利用可）');tick();}catch(e){say('カメラ起動失敗: '+e.message);}}
-function stop(){running=false;stream?.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;ctx.clearRect(0,0,overlay.width,overlay.height);$('placeholder').hidden=false;$('start').disabled=false;$('capture').disabled=$('stop').disabled=true;say('停止中');}
+// iOS Safari may suspend a video track while the full-screen editor is open.
+// Release the track during editing and obtain a fresh track after the editor closes.
+function releaseCamera(){
+ running=false;cameraEpoch++;
+ const old=stream;stream=null;
+ if(old)old.getTracks().forEach(t=>t.stop());
+ video.pause();video.srcObject=null;video.load();
+ ctx.clearRect(0,0,overlay.width,overlay.height);
+}
+function pauseCameraForEditor(){
+ releaseCamera();
+ $('start').disabled=true;$('capture').disabled=true;$('stop').disabled=true;
+}
+async function start(resuming=false){
+ if(running||starting)return;
+ starting=true;const epoch=++cameraEpoch;
+ try{
+  if(!navigator.mediaDevices?.getUserMedia)throw Error('HTTPSのSafariで開いてください');
+  const next=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}});
+  if(epoch!==cameraEpoch){next.getTracks().forEach(t=>t.stop());return;}
+  stream=next;video.srcObject=stream;
+  await video.play();
+  if(epoch!==cameraEpoch)return;
+  $('placeholder').hidden=true;running=true;armed=!resuming;stable=0;previous=null;
+  $('start').disabled=true;$('capture').disabled=$('stop').disabled=false;
+  say(resuming?`カメラ再開完了・保存済み: ${pages.length}ページ`:(window.ScanCorrection?.ready()?'撮影待機中（自動検出利用可）':'撮影待機中（手動四隅補正は利用可）'));
+  tick(epoch);
+ }catch(e){
+  if(epoch===cameraEpoch){releaseCamera();$('placeholder').hidden=false;$('start').disabled=false;$('capture').disabled=$('stop').disabled=true;say('カメラ再開失敗: '+e.message+'。「カメラ開始」を押してください');}
+ }finally{starting=false;}
+}
+function stop(){
+ resumeAfterEdit=false;releaseCamera();$('placeholder').hidden=false;
+ $('start').disabled=false;$('capture').disabled=$('stop').disabled=true;say('停止中');
+}
 async function exportPDF(){if(!pages.length)return;const jsPDF=window.jspdf?.jsPDF;if(!jsPDF){alert('PDFライブラリを読み込めません。ネット接続を確認してください。');return;}const btn=$('export');btn.disabled=true;say('PDF作成中');try{let pdf=null;for(let i=0;i<pages.length;i++){const url=URL.createObjectURL(pages[i].blob),img=new Image();try{img.src=url;await img.decode();const mm=25.4/150,w=img.naturalWidth*mm,h=img.naturalHeight*mm;if(!pdf)pdf=new jsPDF({orientation:w>h?'landscape':'portrait',unit:'mm',format:[w,h],compress:true});else pdf.addPage([w,h],w>h?'landscape':'portrait');pdf.addImage(img,'JPEG',0,0,w,h,undefined,'FAST');}finally{URL.revokeObjectURL(url);}say(`PDF作成中 ${i+1}/${pages.length}`);await sleep(0);}const name=`BookScan_${new Date().toISOString().slice(0,10)}.pdf`;const blob=pdf.output('blob');const file=new File([blob],name,{type:'application/pdf'});if(navigator.canShare?.({files:[file]})){try{await navigator.share({files:[file],title:name});}catch(e){if(e.name!=='AbortError')throw e;}}else{const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}say('PDF作成完了');}catch(e){say('PDF作成失敗: '+e.message);alert('PDF作成に失敗しました。ページ数を減らして再試行してください。');}finally{btn.disabled=false;}}
 $('auto').onchange=updateCaptureMode;updateCaptureMode();$('start').onclick=start;$('stop').onclick=stop;$('capture').onclick=()=>{armed=false;capture();};$('undo').onclick=()=>remove(pages.length-1);$('clear').onclick=async()=>{if(!confirm('全ページを削除しますか？'))return;await transaction('readwrite',s=>s.clear());pages=[];render();};$('export').onclick=exportPDF;window.addEventListener('pagehide',stop);(async()=>{try{db=await dbOpen();await load();say('準備完了');}catch(e){say('保存領域を利用できません: '+e.message);}})();if('serviceWorker'in navigator){navigator.serviceWorker.getRegistrations().then(rs=>Promise.all(rs.map(r=>r.unregister()))).catch(()=>{});}

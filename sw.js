@@ -1,2 +1,2 @@
-// v0.5: no offline cache; avoids stale JS on GitHub Pages.
+// v0.6: no offline cache; force updated camera lifecycle scripts.
 self.addEventListener('install',e=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.registration.unregister()));
