@@ -1,1 +1,14 @@
-<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#17243c"><meta name="apple-mobile-web-app-capable" content="yes"><title>BookScan Web</title><link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="style.css"></head><body><header><h1>📖 BookScan Web</h1><span id="status">準備中</span></header><main><section class="viewer"><video id="camera" autoplay playsinline muted></video><canvas id="overlay"></canvas><div id="placeholder">「カメラ開始」を押してください</div></section><section class="controls"><div class="row"><label>読取方式 <select id="mode"><option value="single">単ページ</option><option value="spread">見開き（左右分割）</option></select></label><label>撮影 <select id="auto"><option value="on">自動＋手動</option><option value="off">手動のみ</option></select></label></div><div class="row"><button id="start">カメラ開始</button><button id="capture" disabled>撮影</button><button id="stop" disabled>停止</button></div><div class="row"><label><input id="enhance" type="checkbox" checked> 明るさ補正</label><label><input id="crop" type="checkbox" checked> 検出領域を切り出す</label></div><p id="hint">撮影時は本を明るい場所で平らに開き、画面に収めてください。</p></section><section class="pages"><div class="row spread"><h2>ページ <span id="count">0</span></h2><button id="export" disabled>PDFを作成</button></div><div class="row"><button id="undo" disabled>最後を削除</button><button id="clear" disabled>全削除</button></div><div id="thumbnails" class="thumbs"></div></section></main><footer>画像は端末内で処理・保存します。Safariで開き、カメラへのアクセスを許可してください。</footer><script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script><script src="app.js"></script></body></html>
+📖 BookScan Web
+準備中
+「カメラ開始」を押してください
+自動撮影モード
+タップでも撮影できます
+読取方式 単ページ見開き（左右分割）撮影モード 自動撮影手動撮影
+カメラ開始停止
+明るさ補正 台形・傾き自動補正 検出領域を切り出す
+自動撮影はページが静止すると作動します。手動撮影では下部の大きな丸いボタンを押してください。補正は撮影後に自動適用します。四隅が検出できない場合は元画像を保存します。台形補正はOpenCVの読み込み完了後に利用できます。
+ページ 0
+PDFを作成
+最後を削除全削除
+
+画像は端末内で処理・保存します。Safariで開き、カメラへのアクセスを許可してください。
